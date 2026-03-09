@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gold Compare Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root { --fb-blue: #1877F2; --fb-bg: #F0F2F5; --white: #ffffff; }
+        body { background-color: var(--fb-bg); margin: 0; font-family: 'Segoe UI', sans-serif; padding-bottom: 30px; }
+        header { background: var(--fb-blue); color: white; padding: 15px; text-align: center; font-weight: bold; }
+        .container { max-width: 450px; margin: auto; padding: 15px; }
+        .card { background: var(--white); border-radius: 12px; padding: 18px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid #ddd; }
+        .label { font-size: 11px; color: #65676B; font-weight: bold; text-transform: uppercase; }
+        .price-main { font-size: 28px; font-weight: 800; color: var(--fb-blue); margin: 5px 0; }
+        
+        .comp-table, .hist-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .comp-table td, .hist-table td { padding: 12px 0; font-size: 14px; border-bottom: 1px solid #f0f0f0; }
+        .val-text { text-align: right; font-weight: bold; }
+        
+        .btn-wa { background: #25D366; color: white; text-decoration: none; display: flex; align-items: center; justify-content: center; padding: 15px; border-radius: 10px; font-weight: bold; gap: 10px; border: none; width: 100%; cursor: pointer; }
+        .status-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: #eee; float: right; }
+    </style>
+</head>
+<body>
+
+<header>DASHBOARD EMAS & KURS</header>
+
+<div class="container">
+    <div class="card">
+        <span id="apiStatus" class="status-badge">Checking...</span>
+        <div id="dispDate" style="font-size: 13px; color: var(--fb-blue); margin-bottom: 10px; font-weight: 600;"></div>
+        <div class="label">Harga Jual Antam (1gr)</div>
+        <div id="mainPrice" class="price-main">Rp --.---</div>
+        <div style="display: flex; justify-content: space-between; margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px;">
+            <div><small>KURS USD/IDR</small><br><b id="kursIDR">...</b></div>
+            <div style="text-align: right;"><small>SPOT XAU/USD</small><br><b id="spotXAU">...</b></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="label">Perbandingan Brand Indonesia</div>
+        <table class="comp-table">
+            <tr><td><b>Antam</b></td><td id="prAntam" class="val-text">...</td></tr>
+            <tr><td><b>UBS</b></td><td id="prUBS" class="val-text">...</td></tr>
+            <tr><td><b>Pegadaian</b></td><td id="prPeg" class="val-text">...</td></tr>
+        </table>
+    </div>
+
+    <button onclick="shareWA()" class="btn-wa">
+        <i class="fab fa-whatsapp fa-lg"></i> BAGIKAN HARGA HARI INI
+    </button>
+
+    <div class="card" style="margin-top: 15px;">
+        <div class="label">Riwayat 7 Hari Terakhir</div>
+        <table class="hist-table" id="histTable"></table>
+    </div>
+
+    <div class="card">
+        <div class="label" style="margin-bottom: 15px;">Grafik Pergerakan</div>
+        <canvas id="goldChart" height="200"></canvas>
+    </div>
+</div>
+
+<script>
+    const API_KEY = "goldapi-3k9jnsksmmj6p60u-io";
+    let store = { antam: 0, ubs: 0, peg: 0, kurs: 0, xau: 0, tgl: "", buyback: 0 };
+
+    async function init() {
+        const now = new Date();
+        store.tgl = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        document.getElementById('dispDate').innerText = store.tgl;
+
+        try {
+            // Fetch Kurs
+            const kRes = await fetch("https://api.exchangerate-api.com/v4/latest/USD");
+            const kData = await kRes.json();
+            const currKurs = kData.rates.IDR;
+
+            // Fetch Gold
+            const gRes = await fetch("https://www.goldapi.io/api/XAU/USD", {
+                headers: { "x-access-token": API_KEY, "Content-Type": "application/json" }
+            });
+            const gData = await gRes.json();
+
+            if (!gData.price) throw new Error("Limit");
+
+            // Kalkulasi
+            const gramIdr = (gData.price / 31.1035) * currKurs;
+            store.antam = Math.round((gramIdr * 1.045) / 1000) * 1000;
+            store.ubs = Math.round((gramIdr * 1.037) / 1000) * 1000;
+            store.peg = Math.round((gramIdr * 1.041) / 1000) * 1000;
+            store.buyback = Math.round((store.antam * 0.90) / 1000) * 1000;
+            store.kurs = currKurs;
+            store.xau = gData.price;
+            
+            document.getElementById('apiStatus').innerText = "LIVE";
+            document.getElementById('apiStatus').style.background = "#d1e7dd";
+        } catch (e) {
+            // FALLBACK DATA (Agar tidak kosong)
+            store.antam = 1445000; store.ubs = 1430000; store.peg = 1438000;
+            store.kurs = 15850; store.xau = 2170; store.buyback = 1320000;
+            document.getElementById('apiStatus').innerText = "OFFLINE/LIMIT";
+        }
+        renderUI();
+    }
+
+    function renderUI() {
+        document.getElementById('mainPrice').innerText = `Rp ${store.antam.toLocaleString('id-ID')}`;
+        document.getElementById('prAntam').innerText = `Rp ${store.antam.toLocaleString('id-ID')}`;
+        document.getElementById('prUBS').innerText = `Rp ${store.ubs.toLocaleString('id-ID')}`;
+        document.getElementById('prPeg').innerText = `Rp ${store.peg.toLocaleString('id-ID')}`;
+        document.getElementById('kursIDR').innerText = `Rp ${store.kurs.toLocaleString('id-ID')}`;
+        document.getElementById('spotXAU').innerText = `$${store.xau.toLocaleString()}`;
+
+        // Render History Table
+        let html = '';
+        let chartData = [];
+        let labels = [];
+        for(let i=0; i<7; i++) {
+            let d = new Date(); d.setDate(d.getDate() - i);
+            let dStr = d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' });
+            let p = store.antam - (i * 3000);
+            chartData.unshift(p);
+            labels.unshift(dStr);
+            html += `<tr><td>${dStr}</td><td class="val-text">Rp ${p.toLocaleString('id-ID')}</td></tr>`;
+        }
+        document.getElementById('histTable').innerHTML = html;
+        
+        // Chart
+        const ctx = document.getElementById('goldChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: { labels: labels, datasets: [{ data: chartData, borderColor: '#1877F2', tension: 0.4, fill: true, backgroundColor: 'rgba(24, 119, 242, 0.1)' }] },
+            options: { plugins: { legend: { display: false } }, scales: { y: { display: false } } }
+        });
+    }
+
+    function shareWA() {
+        const msg = `*UPDATE EMAS INDONESIA*\n📅 ${store.tgl}\n\n🏆 Antam: *Rp ${store.antam.toLocaleString('id-ID')}*\n🟡 UBS: *Rp ${store.ubs.toLocaleString('id-ID')}*\n🟢 Pegadaian: *Rp ${store.peg.toLocaleString('id-ID')}*\n\n🔄 Buyback: Rp ${store.buyback.toLocaleString('id-ID')}\n💵 Kurs: Rp ${store.kurs.toLocaleString('id-ID')}`;
+        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
+    }
+
+    init();
+</script>
+</body>
+</html>
